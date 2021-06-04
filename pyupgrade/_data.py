@@ -131,5 +131,3 @@ def import_plugins(settings: Settings) -> None:
     for _, name, _ in mod_infos:
         if should_run_fix(settings, name):
             __import__(name, fromlist=['_trash'])
-        else:
-            print(f"Skipping {name}")
