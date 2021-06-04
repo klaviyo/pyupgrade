@@ -842,9 +842,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument('filenames', nargs='*')
     parser.add_argument(
         '--fixes-to-exclude',
-        choices=get_fix_names(),
-        nargs='+',
+        nargs='*',
+        type=str,
         default=[],
+        help="Fixes that should be excluded.",
+        choices=get_fix_names(),
+        metavar='FIX_NAME'
     )
     parser.add_argument('--exit-zero-even-if-changed', action='store_true')
     parser.add_argument('--keep-percent-format', action='store_true')
