@@ -124,10 +124,20 @@ def should_run_fix(settings: Settings, fix_name: str) -> bool:
     return fix_name not in settings.fixes_to_exclude
 
 
+def _get_all_plugins():
+    plugins_path: str = _plugins.__path__  # type: ignore
+    return pkgutil.walk_packages(plugins_path, f'{_plugins.__name__}.')
+
+
+def get_fix_names() -> list:
+    return [
+        name.split('.')[-1] for _, name, _ in _get_all_plugins()
+    ]
+
+
 def import_plugins(settings: Settings) -> None:
     # https://github.com/python/mypy/issues/1422
-    plugins_path: str = _plugins.__path__  # type: ignore
-    mod_infos = pkgutil.walk_packages(plugins_path, f'{_plugins.__name__}.')
+    mod_infos = _get_all_plugins()
     for _, name, _ in mod_infos:
         if should_run_fix(settings, name):
             __import__(name, fromlist=['_trash'])

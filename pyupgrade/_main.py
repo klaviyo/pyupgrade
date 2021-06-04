@@ -28,7 +28,7 @@ from pyupgrade import _plugins
 from pyupgrade._ast_helpers import ast_parse
 from pyupgrade._ast_helpers import ast_to_offset
 from pyupgrade._ast_helpers import has_starargs
-from pyupgrade._data import FUNCS, import_plugins
+from pyupgrade._data import FUNCS, get_fix_names, import_plugins
 from pyupgrade._data import Settings
 from pyupgrade._data import Version
 from pyupgrade._data import visit
@@ -45,14 +45,6 @@ DotFormatPart = Tuple[str, Optional[str], Optional[str], Optional[str]]
 FUNC_TYPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef)
 
 _stdlib_parse_format = string.Formatter().parse
-
-
-def get_all_fixes():
-    plugins_path: str = _plugins.__path__  # type: ignore
-    mod_infos = pkgutil.walk_packages(plugins_path, f'{_plugins.__name__}.')
-    return [
-        arr[1].split('.')[-1] for arr in mod_infos
-    ]
 
 
 def parse_format(s: str) -> Tuple[DotFormatPart, ...]:
@@ -845,18 +837,13 @@ def _fix_file(filename: str, args: argparse.Namespace) -> int:
         return contents_text != contents_text_orig
 
 
-def _comma_separated_list(list):
-    return list.split(',')
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('filenames', nargs='*')
     parser.add_argument(
         '--fixes-to-exclude',
-        choices=get_all_fixes(),
+        choices=get_fix_names(),
         nargs='+',
-        type=str,
         default=[],
     )
     parser.add_argument('--exit-zero-even-if-changed', action='store_true')
