@@ -20,6 +20,7 @@ from pyupgrade._ast_helpers import ast_to_offset
 from pyupgrade._data import register
 from pyupgrade._data import State
 from pyupgrade._data import TokenFunc
+from pyupgrade._data import should_run_fix
 from pyupgrade._token_helpers import Block
 from pyupgrade._token_helpers import find_and_replace_call
 from pyupgrade._token_helpers import find_block_start
@@ -180,12 +181,10 @@ def visit_Module(
         node: ast.Module,
         parent: ast.AST,
 ) -> Iterable[Tuple[Offset, TokenFunc]]:
-    if state.settings.min_version < (3,):
-        return
+    if state.settings.min_version >= (3,) and should_run_fix(state.settings, __name__):
+        visitor = Visitor()
+        visitor.visit(node)
 
-    visitor = Visitor()
-    visitor.visit(node)
-
-    super_func = functools.partial(find_and_replace_call, template='super()')
-    for offset in visitor.super_offsets:
-        yield offset, super_func
+        super_func = functools.partial(find_and_replace_call, template='super()')
+        for offset in visitor.super_offsets:
+            yield offset, super_func

@@ -28,7 +28,7 @@ from pyupgrade import _plugins
 from pyupgrade._ast_helpers import ast_parse
 from pyupgrade._ast_helpers import ast_to_offset
 from pyupgrade._ast_helpers import has_starargs
-from pyupgrade._data import FUNCS, import_plugins
+from pyupgrade._data import FUNCS
 from pyupgrade._data import Settings
 from pyupgrade._data import Version
 from pyupgrade._data import visit
@@ -845,18 +845,12 @@ def _fix_file(filename: str, args: argparse.Namespace) -> int:
         return contents_text != contents_text_orig
 
 
-def _comma_separated_list(list):
-    return list.split(',')
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('filenames', nargs='*')
     parser.add_argument(
         '--fixes-to-exclude',
         choices=get_all_fixes(),
-        nargs='+',
-        type=str,
         default=[],
     )
     parser.add_argument('--exit-zero-even-if-changed', action='store_true')
@@ -892,6 +886,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action='store_const', dest='min_version', const=(3, 11),
     )
     args = parser.parse_args(argv)
+
     ret = 0
     for filename in args.filenames:
         ret |= _fix_file(filename, args)

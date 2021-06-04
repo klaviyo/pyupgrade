@@ -58,11 +58,16 @@ RECORD_FROM_IMPORTS = frozenset((
 FUNCS = collections.defaultdict(list)
 
 
+def should_run_fix(settings: Settings, fix_name: str) -> bool:
+    fix_name = fix_name.split('.')[-1]
+
+    return fix_name not in settings.fixes_to_exclude
+
+
 def register(tp: Type[AST_T]) -> Callable[[ASTFunc[AST_T]], ASTFunc[AST_T]]:
     def register_decorator(func: ASTFunc[AST_T]) -> ASTFunc[AST_T]:
         FUNCS[tp].append(func)
         return func
-
     return register_decorator
 
 
@@ -75,8 +80,6 @@ def visit(
         tree: ast.Module,
         settings: Settings,
 ) -> Dict[Offset, List[TokenFunc]]:
-    import_plugins(settings)
-
     initial_state = State(
         settings=settings,
         from_imports=collections.defaultdict(set),
@@ -118,18 +121,12 @@ def visit(
     return ret
 
 
-def should_run_fix(settings: Settings, fix_name: str) -> bool:
-    fix_name = fix_name.split('.')[-1]
-
-    return fix_name not in settings.fixes_to_exclude
-
-
-def import_plugins(settings: Settings) -> None:
+def _import_plugins() -> None:
     # https://github.com/python/mypy/issues/1422
     plugins_path: str = _plugins.__path__  # type: ignore
     mod_infos = pkgutil.walk_packages(plugins_path, f'{_plugins.__name__}.')
     for _, name, _ in mod_infos:
-        if should_run_fix(settings, name):
-            __import__(name, fromlist=['_trash'])
-        else:
-            print(f"Skipping {name}")
+        __import__(name, fromlist=['_trash'])
+
+
+_import_plugins()
