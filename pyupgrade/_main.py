@@ -290,94 +290,6 @@ def _remove_fmt(tup: DotFormatPart) -> DotFormatPart:
         return (tup[0], '', tup[2], tup[3])
 
 
-def _fix_format_literal(tokens: List[Token], end: int) -> None:
-    parts = rfind_string_parts(tokens, end)
-    parsed_parts = []
-    last_int = -1
-    for i in parts:
-        # f'foo {0}'.format(...) would get turned into a SyntaxError
-        prefix, _ = parse_string_literal(tokens[i].src)
-        if 'f' in prefix.lower():
-            return
-
-        try:
-            parsed = parse_format(tokens[i].src)
-        except ValueError:
-            # the format literal was malformed, skip it
-            return
-
-        # The last segment will always be the end of the string and not a
-        # format, slice avoids the `None` format key
-        for _, fmtkey, spec, _ in parsed[:-1]:
-            if (
-                    fmtkey is not None and inty(fmtkey) and
-                    int(fmtkey) == last_int + 1 and
-                    spec is not None and '{' not in spec
-            ):
-                last_int += 1
-            else:
-                return
-
-        parsed_parts.append(tuple(_remove_fmt(tup) for tup in parsed))
-
-    for i, parsed in zip(parts, parsed_parts):
-        tokens[i] = tokens[i]._replace(src=unparse_parsed_string(parsed))
-
-
-def _fix_encode_to_binary(tokens: List[Token], i: int) -> None:
-    # .encode()
-    if (
-            i + 2 < len(tokens) and
-            tokens[i + 1].src == '(' and
-            tokens[i + 2].src == ')'
-    ):
-        victims = slice(i - 1, i + 3)
-        latin1_ok = False
-    # .encode('encoding')
-    elif (
-            i + 3 < len(tokens) and
-            tokens[i + 1].src == '(' and
-            tokens[i + 2].name == 'STRING' and
-            tokens[i + 3].src == ')'
-    ):
-        victims = slice(i - 1, i + 4)
-        prefix, rest = parse_string_literal(tokens[i + 2].src)
-        if 'f' in prefix.lower():
-            return
-        encoding = ast.literal_eval(prefix + rest)
-        if is_codec(encoding, 'ascii') or is_codec(encoding, 'utf-8'):
-            latin1_ok = False
-        elif is_codec(encoding, 'iso8859-1'):
-            latin1_ok = True
-        else:
-            return
-    else:
-        return
-
-    parts = rfind_string_parts(tokens, i - 2)
-    if not parts:
-        return
-
-    for part in parts:
-        prefix, rest = parse_string_literal(tokens[part].src)
-        escapes = set(ESCAPE_RE.findall(rest))
-        if (
-                not is_ascii(rest) or
-                '\\u' in escapes or
-                '\\U' in escapes or
-                '\\N' in escapes or
-                ('\\x' in escapes and not latin1_ok) or
-                'f' in prefix.lower()
-        ):
-            return
-
-    for part in parts:
-        prefix, rest = parse_string_literal(tokens[part].src)
-        prefix = 'b' + prefix.replace('u', '').replace('U', '')
-        tokens[part] = tokens[part]._replace(src=prefix + rest)
-    del tokens[victims]
-
-
 def _build_import_removals() -> Dict[Version, Dict[str, Tuple[str, ...]]]:
     ret = {}
     future: Tuple[Tuple[Version, Tuple[str, ...]], ...] = (
@@ -490,6 +402,8 @@ def _fix_tokens(contents_text: str, min_version: Version) -> str:
             if remove_u:
                 tokens[i] = _remove_u_prefix(tokens[i])
             tokens[i] = _fix_escape_sequences(tokens[i])
+        elif token.src == '(':
+            _fix_extraneous_parens(tokens, i)
         elif token.src == 'from' and token.utf8_byte_offset == 0:
             _fix_import_removals(tokens, i, min_version)
     return tokens_to_src(tokens).lstrip()
