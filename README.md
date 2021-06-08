@@ -25,6 +25,47 @@ Sample `.pre-commit-config.yaml`:
     -   id: pyupgrade
 ```
 
+## Exclude Specific Fixes
+
+```
+pyupgrade ... --fixes-to-exclude <FIX NAME ...>
+```
+
+Available Fixes:
+
+```
+default_encoding
+dict_literals
+generator_expressions_pep289
+identity_equality
+io_open
+legacy
+lru_cache
+metaclass_type
+mock
+native_literals
+new_style_classes
+open_mode
+oserror_aliases
+pep584
+percent_format
+set_literals
+six_base_classes
+six_calls
+six_metaclasses
+six_remove_decorators
+six_simple
+subprocess_run
+typing_pep563
+typing_pep585
+typing_pep604
+typing_text
+unpack_list_comprehension
+versioned_branches
+fstring
+```
+
+
 ## Implemented features
 
 ### Set literals
