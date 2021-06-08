@@ -290,6 +290,40 @@ def _remove_fmt(tup: DotFormatPart) -> DotFormatPart:
         return (tup[0], '', tup[2], tup[3])
 
 
+def _fix_format_literal(tokens: List[Token], end: int) -> None:
+    parts = rfind_string_parts(tokens, end)
+    parsed_parts = []
+    last_int = -1
+    for i in parts:
+        # f'foo {0}'.format(...) would get turned into a SyntaxError
+        prefix, _ = parse_string_literal(tokens[i].src)
+        if 'f' in prefix.lower():
+            return
+
+        try:
+            parsed = parse_format(tokens[i].src)
+        except ValueError:
+            # the format literal was malformed, skip it
+            return
+
+        # The last segment will always be the end of the string and not a
+        # format, slice avoids the `None` format key
+        for _, fmtkey, spec, _ in parsed[:-1]:
+            if (
+                    fmtkey is not None and inty(fmtkey) and
+                    int(fmtkey) == last_int + 1 and
+                    spec is not None and '{' not in spec
+            ):
+                last_int += 1
+            else:
+                return
+
+        parsed_parts.append(tuple(_remove_fmt(tup) for tup in parsed))
+
+    for i, parsed in zip(parts, parsed_parts):
+        tokens[i] = tokens[i]._replace(src=unparse_parsed_string(parsed))
+
+
 def _build_import_removals() -> Dict[Version, Dict[str, Tuple[str, ...]]]:
     ret = {}
     future: Tuple[Tuple[Version, Tuple[str, ...]], ...] = (
@@ -397,13 +431,27 @@ def _fix_tokens(contents_text: str, min_version: Version) -> str:
     except tokenize.TokenError:
         return contents_text
     for i, token in reversed_enumerate(tokens):
-        if token.name == 'STRING':
+        if token.name == 'NUMBER':
+            tokens[i] = token._replace(src=_fix_long(_fix_octal(token.src)))
+        elif token.name == 'STRING':
             tokens[i] = _fix_ur_literals(tokens[i])
             if remove_u:
                 tokens[i] = _remove_u_prefix(tokens[i])
             tokens[i] = _fix_escape_sequences(tokens[i])
         elif token.src == '(':
             _fix_extraneous_parens(tokens, i)
+        elif token.src == 'format' and i > 0 and tokens[i - 1].src == '.':
+            _fix_format_literal(tokens, i - 2)
+        elif (
+                min_version >= (3,) and
+                token.utf8_byte_offset == 0 and
+                token.line < 3 and
+                token.name == 'COMMENT' and
+                tokenize.cookie_re.match(token.src)
+        ):
+            del tokens[i]
+            assert tokens[i].name == 'NL', tokens[i].name
+            del tokens[i]
         elif token.src == 'from' and token.utf8_byte_offset == 0:
             _fix_import_removals(tokens, i, min_version)
     return tokens_to_src(tokens).lstrip()
@@ -606,6 +654,35 @@ def _skip_unimportant_ws(tokens: List[Token], i: int) -> int:
     return i
 
 
+def _to_fstring(
+    src: str, tokens: List[Token], args: List[Tuple[int, int]],
+) -> str:
+    params = {}
+    i = 0
+    for start, end in args:
+        start = _skip_unimportant_ws(tokens, start)
+        if tokens[start].name == 'NAME':
+            after = _skip_unimportant_ws(tokens, start + 1)
+            if tokens[after].src == '=':  # keyword argument
+                params[tokens[start].src] = tokens_to_src(
+                    tokens[after + 1:end],
+                ).strip()
+                continue
+        params[str(i)] = tokens_to_src(tokens[start:end]).strip()
+        i += 1
+
+    parts = []
+    i = 0
+    for s, name, spec, conv in parse_format('f' + src):
+        if name is not None:
+            k, dot, rest = name.partition('.')
+            name = ''.join((params[k or str(i)], dot, rest))
+            if not k:  # named and auto params can be in different orders
+                i += 1
+        parts.append((s, name, spec, conv))
+    return unparse_parsed_string(parts)
+
+
 def _typed_class_replacement(
         tokens: List[Token],
         i: int,
@@ -627,7 +704,7 @@ def _typed_class_replacement(
     return end, attrs
 
 
-def _fix_py36_plus(contents_text: str) -> str:
+def _fix_py36_plus(contents_text: str, settings: Settings) -> str:
     try:
         ast_obj = ast_parse(contents_text)
     except SyntaxError:
@@ -666,6 +743,12 @@ def _fix_py36_plus(contents_text: str) -> str:
             args_src = tokens_to_src(tokens[paren:end])
             if '\\' in args_src or '"' in args_src or "'" in args_src:
                 continue
+
+            if 'fstring' not in settings.fixes_to_exclude:
+                tokens[i] = token._replace(
+                    src=_to_fstring(token.src, tokens, args),
+                )
+                del tokens[i + 1:end]
         elif token.offset in visitor.named_tuples and token.name == 'NAME':
             call = visitor.named_tuples[token.offset]
             types: Dict[str, ast.expr] = {
@@ -724,19 +807,21 @@ def _fix_file(filename: str, args: argparse.Namespace) -> int:
         print(f'{filename} is non-utf-8 (not supported)')
         return 1
 
+    settings = Settings(
+        min_version=args.min_version,
+        keep_percent_format=args.keep_percent_format,
+        keep_mock=args.keep_mock,
+        keep_runtime_typing=args.keep_runtime_typing,
+        fixes_to_exclude=args.fixes_to_exclude,
+    )
+
     contents_text = _fix_plugins(
         contents_text,
-        settings=Settings(
-            min_version=args.min_version,
-            keep_percent_format=args.keep_percent_format,
-            keep_mock=args.keep_mock,
-            keep_runtime_typing=args.keep_runtime_typing,
-            fixes_to_exclude=args.fixes_to_exclude,
-        ),
+        settings=settings,
     )
     contents_text = _fix_tokens(contents_text, min_version=args.min_version)
     if args.min_version >= (3, 6):
-        contents_text = _fix_py36_plus(contents_text)
+        contents_text = _fix_py36_plus(contents_text, settings)
 
     if filename == '-':
         print(contents_text, end='')

@@ -118,10 +118,12 @@ def visit(
     return ret
 
 
-def should_run_fix(settings: Settings, fix_name: str) -> bool:
-    fix_name = fix_name.split('.')[-1]
+def _get_fix_name_from_path(path: str) -> str:
+    return path.split('.')[-1]
 
-    return fix_name not in settings.fixes_to_exclude
+
+def _should_import_plugin(settings: Settings, plugin_file_path: str) -> bool:
+    return _get_fix_name_from_path(plugin_file_path) not in settings.fixes_to_exclude
 
 
 def _get_all_plugins():
@@ -130,14 +132,20 @@ def _get_all_plugins():
 
 
 def get_fix_names() -> list:
-    return [
-        name.split('.')[-1] for _, name, _ in _get_all_plugins()
+    plugin_fixes = [
+        _get_fix_name_from_path(name) for _, name, _ in _get_all_plugins()
     ]
+
+    token_fixes = [
+        'fstring'
+    ]
+
+    return plugin_fixes + token_fixes
 
 
 def import_plugins(settings: Settings) -> None:
     # https://github.com/python/mypy/issues/1422
     mod_infos = _get_all_plugins()
     for _, name, _ in mod_infos:
-        if should_run_fix(settings, name):
+        if _should_import_plugin(settings, name):
             __import__(name, fromlist=['_trash'])
