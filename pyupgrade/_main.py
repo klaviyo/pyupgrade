@@ -1,7 +1,6 @@
 import argparse
 import ast
 import collections
-import pkgutil
 import re
 import string
 import sys
@@ -16,19 +15,18 @@ from typing import Tuple
 
 from tokenize_rt import NON_CODING_TOKENS
 from tokenize_rt import Offset
+from tokenize_rt import Token
+from tokenize_rt import UNIMPORTANT_WS
 from tokenize_rt import parse_string_literal
 from tokenize_rt import reversed_enumerate
 from tokenize_rt import rfind_string_parts
 from tokenize_rt import src_to_tokens
-from tokenize_rt import Token
 from tokenize_rt import tokens_to_src
-from tokenize_rt import UNIMPORTANT_WS
 
-from pyupgrade import _plugins
 from pyupgrade._ast_helpers import ast_parse
 from pyupgrade._ast_helpers import ast_to_offset
 from pyupgrade._ast_helpers import has_starargs
-from pyupgrade._data import FUNCS, get_fix_names, import_plugins
+from pyupgrade._data import FIX_ESCAPE_SEQUENCES, FIX_FSTRING, FIX_PY3_COMPAT_IMPORT_REMOVALS, FUNCS, get_fix_names
 from pyupgrade._data import Settings
 from pyupgrade._data import Version
 from pyupgrade._data import visit
@@ -324,6 +322,60 @@ def _fix_format_literal(tokens: List[Token], end: int) -> None:
         tokens[i] = tokens[i]._replace(src=unparse_parsed_string(parsed))
 
 
+def _fix_encode_to_binary(tokens: List[Token], i: int) -> None:
+    # .encode()
+    if (
+            i + 2 < len(tokens) and
+            tokens[i + 1].src == '(' and
+            tokens[i + 2].src == ')'
+    ):
+        victims = slice(i - 1, i + 3)
+        latin1_ok = False
+    # .encode('encoding')
+    elif (
+            i + 3 < len(tokens) and
+            tokens[i + 1].src == '(' and
+            tokens[i + 2].name == 'STRING' and
+            tokens[i + 3].src == ')'
+    ):
+        victims = slice(i - 1, i + 4)
+        prefix, rest = parse_string_literal(tokens[i + 2].src)
+        if 'f' in prefix.lower():
+            return
+        encoding = ast.literal_eval(prefix + rest)
+        if is_codec(encoding, 'ascii') or is_codec(encoding, 'utf-8'):
+            latin1_ok = False
+        elif is_codec(encoding, 'iso8859-1'):
+            latin1_ok = True
+        else:
+            return
+    else:
+        return
+
+    parts = rfind_string_parts(tokens, i - 2)
+    if not parts:
+        return
+
+    for part in parts:
+        prefix, rest = parse_string_literal(tokens[part].src)
+        escapes = set(ESCAPE_RE.findall(rest))
+        if (
+                not is_ascii(rest) or
+                '\\u' in escapes or
+                '\\U' in escapes or
+                '\\N' in escapes or
+                ('\\x' in escapes and not latin1_ok) or
+                'f' in prefix.lower()
+        ):
+            return
+
+    for part in parts:
+        prefix, rest = parse_string_literal(tokens[part].src)
+        prefix = 'b' + prefix.replace('u', '').replace('U', '')
+        tokens[part] = tokens[part]._replace(src=prefix + rest)
+    del tokens[victims]
+
+
 def _build_import_removals() -> Dict[Version, Dict[str, Tuple[str, ...]]]:
     ret = {}
     future: Tuple[Tuple[Version, Tuple[str, ...]], ...] = (
@@ -420,9 +472,9 @@ def _fix_import_removals(
                 del tokens[j:idx + 1]
 
 
-def _fix_tokens(contents_text: str, min_version: Version) -> str:
+def _fix_tokens(contents_text: str, settings: Settings) -> str:
     remove_u = (
-        min_version >= (3,) or
+        settings.min_version >= (3,) or
         _imports_future(contents_text, 'unicode_literals')
     )
 
@@ -437,13 +489,16 @@ def _fix_tokens(contents_text: str, min_version: Version) -> str:
             tokens[i] = _fix_ur_literals(tokens[i])
             if remove_u:
                 tokens[i] = _remove_u_prefix(tokens[i])
-            tokens[i] = _fix_escape_sequences(tokens[i])
+            if FIX_ESCAPE_SEQUENCES not in settings.fixes_to_exclude:
+                tokens[i] = _fix_escape_sequences(tokens[i])
         elif token.src == '(':
             _fix_extraneous_parens(tokens, i)
         elif token.src == 'format' and i > 0 and tokens[i - 1].src == '.':
             _fix_format_literal(tokens, i - 2)
+        elif token.src == 'encode' and i > 0 and tokens[i - 1].src == '.':
+            _fix_encode_to_binary(tokens, i)
         elif (
-                min_version >= (3,) and
+                settings.min_version >= (3,) and
                 token.utf8_byte_offset == 0 and
                 token.line < 3 and
                 token.name == 'COMMENT' and
@@ -453,7 +508,8 @@ def _fix_tokens(contents_text: str, min_version: Version) -> str:
             assert tokens[i].name == 'NL', tokens[i].name
             del tokens[i]
         elif token.src == 'from' and token.utf8_byte_offset == 0:
-            _fix_import_removals(tokens, i, min_version)
+            if FIX_PY3_COMPAT_IMPORT_REMOVALS not in settings.fixes_to_exclude:
+                _fix_import_removals(tokens, i, settings.min_version)
     return tokens_to_src(tokens).lstrip()
 
 
@@ -744,7 +800,7 @@ def _fix_py36_plus(contents_text: str, settings: Settings) -> str:
             if '\\' in args_src or '"' in args_src or "'" in args_src:
                 continue
 
-            if 'fstring' not in settings.fixes_to_exclude:
+            if FIX_FSTRING not in settings.fixes_to_exclude:
                 tokens[i] = token._replace(
                     src=_to_fstring(token.src, tokens, args),
                 )
@@ -819,7 +875,7 @@ def _fix_file(filename: str, args: argparse.Namespace) -> int:
         contents_text,
         settings=settings,
     )
-    contents_text = _fix_tokens(contents_text, min_version=args.min_version)
+    contents_text = _fix_tokens(contents_text, settings)
     if args.min_version >= (3, 6):
         contents_text = _fix_py36_plus(contents_text, settings)
 

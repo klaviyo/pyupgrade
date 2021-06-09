@@ -7,9 +7,9 @@ from typing import Iterable
 from typing import List
 from typing import NamedTuple
 from typing import Set
+from typing import TYPE_CHECKING
 from typing import Tuple
 from typing import Type
-from typing import TYPE_CHECKING
 from typing import TypeVar
 
 from tokenize_rt import Offset
@@ -23,6 +23,17 @@ else:
     Protocol = object
 
 Version = Tuple[int, ...]
+
+
+FIX_FSTRING = 'fstring'
+FIX_ESCAPE_SEQUENCES = 'escape_sequences'
+FIX_PY3_COMPAT_IMPORT_REMOVALS = 'py3_compat_import_removals'
+
+TOKEN_FIXES = [
+    FIX_FSTRING,
+    FIX_ESCAPE_SEQUENCES,
+    FIX_PY3_COMPAT_IMPORT_REMOVALS,
+]
 
 
 class Settings(NamedTuple):
@@ -136,11 +147,7 @@ def get_fix_names() -> list:
         _get_fix_name_from_path(name) for _, name, _ in _get_all_plugins()
     ]
 
-    token_fixes = [
-        'fstring'
-    ]
-
-    return plugin_fixes + token_fixes
+    return plugin_fixes + TOKEN_FIXES
 
 
 def import_plugins(settings: Settings) -> None:
