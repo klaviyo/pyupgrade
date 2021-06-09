@@ -26,44 +26,12 @@ Sample `.pre-commit-config.yaml`:
 ```
 
 ## Exclude Specific Fixes
-```
-pyupgrade ... --fixes-to-exclude <FIX NAME ...>
-```
-
-Available Fixes:
+Fix names are included next to the examples below, where applicable. If you would like to exclude a certain fix, and
+it supports exclusion (most fixes do but not all), then pass that fix name in as an argument to the 
+`--fixes-to-exclude` flag.
 
 ```
-default_encoding
-dict_literals
-generator_expressions_pep289
-identity_equality
-io_open
-legacy
-lru_cache
-metaclass_type
-mock
-native_literals
-new_style_classes
-open_mode
-oserror_aliases
-pep584
-percent_format
-set_literals
-six_base_classes
-six_calls
-six_metaclasses
-six_remove_decorators
-six_simple
-subprocess_run
-typing_pep563
-typing_pep585
-typing_pep604
-typing_text
-unpack_list_comprehension
-versioned_branches
-fstring
-escape_sequences
-py3_compat_import_removals
+pyupgrade ... --fixes-to-exclude <FIX NAME> <Fix NAME ...>
 ```
 
 
